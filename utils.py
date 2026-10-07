@@ -155,33 +155,51 @@ class DeepONet(nn.Module):
         return u + self.bias
     
 
-def physics_loss(model, f_sensors, x_collocation, f_collocation):
-    # detach() makes x a fresh leaf; gradients are only needed with respect to x.
+def compute_quantum_losses_mc(model, V_sensors, x_collocation, V_collocation, psi_prev=None):
+    """
+    x_collocation: [B, Q, 1] - punkty losowane z torch.rand
+    """
     x = x_collocation.detach().clone().requires_grad_(True)
-    u = model(f_sensors, x)  # [B,Q]
-
-    u_x = torch.autograd.grad(
-        u, x,
-        grad_outputs=torch.ones_like(u),
+    x_sq = x.squeeze(-1) # [B, Q]
+    
+    # Hard boundary conditions: psi(0)=psi(1)=0
+    psi = x_sq * (1.0 - x_sq) * raw_out
+    
+    # Graduate psi with respect to x to compute derivatives
+    psi_x = torch.autograd.grad(
+        psi, x,
+        grad_outputs=torch.ones_like(psi),
         create_graph=True,
-    )[0]  # [B,Q,1]
-
-    u_xx = torch.autograd.grad(
-        u_x, x,
-        grad_outputs=torch.ones_like(u_x),
+    )[0]
+    
+    psi_xx = torch.autograd.grad(
+        psi_x, x,
+        grad_outputs=torch.ones_like(psi_x),
         create_graph=True,
-    )[0].squeeze(-1)  # [B,Q]
-
-    # PDE: -u''(x)=f(x)
-    residual = -u_xx - f_collocation
-    return torch.mean(residual.square())
-
-def boundary_loss(model, f_sensors):
-    batch_size = f_sensors.shape[0]
-    x_boundary = torch.tensor([0.0, 1.0], device=f_sensors.device)
-    x_boundary = x_boundary.view(1, 2, 1).expand(batch_size, -1, -1)
-    u_boundary = model(f_sensors, x_boundary)
-    return torch.mean(u_boundary.square())
+    )[0].squeeze(-1)
+    
+    H_psi = -0.5 * psi_xx + (V_collocation * psi)
+    
+    # Monte Carlo integration to compute expectation values
+    E_num = torch.mean(psi * H_psi, dim=1) # [B]
+    E_den = torch.mean(psi**2, dim=1)      # [B]
+    
+    E = E_num / (E_den + 1e-8) # [B]
+    
+    # Separate the PDE residual for loss computation
+    residual = H_psi - (E.unsqueeze(1) * psi)
+    loss_pde = torch.mean(residual.square())
+    
+    # Normalization loss
+    loss_norm = torch.mean((E_den - 1.0)**2)
+    
+    # Orthogonalization loss with respect to previous wavefunctions
+    loss_ortho = torch.tensor(0.0, device=x.device)
+    if psi_prev is not None:
+        overlap = torch.mean(psi * psi_prev, dim=1)
+        loss_ortho = torch.mean(overlap**2)
+        
+    return loss_pde, loss_norm, loss_ortho, E
 
 
 def plot_predictions(x, u_exact, u_pred, f_source=None):
