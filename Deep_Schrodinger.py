@@ -1,73 +1,75 @@
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
 import utils
 
-n_sensors = 50
-n_collocation = 100  # number of collocation points for physics-informed loss
-sensor_x = torch.linspace(0.0, 1.0, n_sensors)  # sensor points = positions of f-values (f representation) [M]
-
-# ---------------------------------------------------------
-# Training DeepONet
-# ---------------------------------------------------------
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = utils.DeepONet(
-    n_sensors=n_sensors,
-    latent_dim=64,
-).to(device)
+n_sensors = 50
+n_collocation = 2000  
+sensor_x = torch.linspace(0.0, 1.0, n_sensors).to(device)
 
+model = utils.DeepONet(n_sensors=n_sensors, latent_dim=64).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-loss_history = []
-steps_per_epoch = 50
-for epoch in range(500):
-    model.train()
-    epoch_loss = 0.0
 
-    # We generate fresh functions and fresh collocation points every step.
+
+#---------------------------------------------------------
+# Set hyperparameters for training
+epochs = 200
+steps_per_epoch = 50
+w_pde = 1.0
+w_norm = 10.0
+w_ortho = 10.0
+#---------------------------------------------------------
+
+history_pde, history_norm, history_ortho, history_total = [], [], [], []
+
+
+
+for epoch in range(epochs):
+    model.train()
+    epoch_pde, epoch_norm, epoch_ortho, epoch_total = 0.0, 0.0, 0.0, 0.0
+
     for _ in range(steps_per_epoch):
-        _, f_sensors, x_c, f_c = utils.sample_problem_batch(
-            batch_size=32,
-            sensor_x=sensor_x,
-            n_collocation=n_collocation,
-            n_modes=5,
-            device=device,
-        )
+        # Generate random coefficients for the potential and evaluate the source term at sensor locations
+        coefficients = torch.randn(32, 5, device=device)
+        V_sensors = utils.evaluate_source(coefficients, sensor_x) 
+        
+        x_c = torch.rand(32, n_collocation, 1, device=device)
+        V_c = utils.evaluate_source(coefficients, x_c)
 
         optimizer.zero_grad(set_to_none=True)
-        loss_pde = utils.physics_loss(model, f_sensors, x_c, f_c)
-        loss_bc = utils.boundary_loss(model, f_sensors)  # here respected by definition of physics_loss, but we keep it separate for clarity
-        loss = loss_pde + loss_bc
+        
+        # Call the loss function from the utils file
+        loss_pde, loss_norm, loss_ortho, E = utils.loss_functions(
+            model, V_sensors, x_c, V_c, psi_prev=None
+        )
+        
+        loss = (w_pde * loss_pde) + (w_norm * loss_norm) + (w_ortho * loss_ortho)
         loss.backward()
         optimizer.step()
-        epoch_loss += loss.item()
+        
+        epoch_pde += loss_pde.item()
+        epoch_norm += loss_norm.item()
+        epoch_ortho += loss_ortho.item()
+        epoch_total += loss.item()
 
     if epoch % 10 == 0:
-        average_loss = epoch_loss / steps_per_epoch
-        loss_history.append(average_loss)
-        print(f"epoch={epoch:4d}, physics_loss={average_loss:.4e}")
+        avg_total = epoch_total / steps_per_epoch
+        history_total.append(avg_total)
+        history_pde.append(epoch_pde / steps_per_epoch)
+        history_norm.append(epoch_norm / steps_per_epoch)
+        history_ortho.append(epoch_ortho / steps_per_epoch)
+        
+        print(f"epoch={epoch:4d} | Total: {avg_total:.3e} | PDE: {history_pde[-1]:.3e} | Norm: {history_norm[-1]:.3e}")
 
 
-# ---------------------------------------------------------
-# Test using new function
-# ---------------------------------------------------------
+# Save the trained model
+torch.save(model.state_dict(), "deeponet_quantum.pth")
+print("Saved model weights to file 'deeponet_quantum.pth'")
 
-model.eval()
-
-f_test, query_x, u_exact = utils.generate_functions(
-    n_functions=1,
-    sensor_x=sensor_x,
-    query_x=torch.linspace(0.0, 1.0, 100),
-    n_modes=5,
+# Plot the loss history
+utils.plot_separated_losses(
+    history_total, 
+    history_pde, 
+    history_norm, 
+    history_ortho, 
+    no_epochs_per_tick=10
 )
-with torch.no_grad():
-    u_pred = model(
-        f_test.to(device),
-        query_x.to(device),
-    ).cpu()
-relative_error = (
-    torch.linalg.norm(u_pred - u_exact) / torch.linalg.norm(u_exact)
-)
-print("Relative L2 error:", relative_error.item())
-utils.plot_loss(loss_history, no_epochs_per_tick=10)
-utils.plot_predictions(query_x, u_exact, u_pred, [sensor_x, f_test])
