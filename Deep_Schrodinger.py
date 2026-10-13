@@ -3,7 +3,7 @@ import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 n_sensors = 50
-n_collocation = 2000
+n_collocation = 1024
 n_states = 3  
 sensor_x = torch.linspace(0.0, 1.0, n_sensors).to(device)
 
@@ -13,11 +13,11 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 #---------------------------------------------------------
 # Set hyperparameters for training
-epochs = 200
+epochs = 100
 steps_per_epoch = 50
 w_pde = 1.0
-w_norm = 10.0
-w_ortho = 10.0
+w_norm = 100.0
+w_ortho = 10000.0
 #---------------------------------------------------------
 
 history_pde, history_norm, history_ortho, history_total = [], [], [], []
