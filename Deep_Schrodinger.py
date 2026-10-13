@@ -3,10 +3,11 @@ import utils
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 n_sensors = 50
-n_collocation = 2000  
+n_collocation = 2000
+n_states = 3  
 sensor_x = torch.linspace(0.0, 1.0, n_sensors).to(device)
 
-model = utils.DeepONet(n_sensors=n_sensors, latent_dim=64).to(device)
+model = utils.DeepONet(n_sensors=n_sensors, n_states=n_states, latent_dim=64).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 
 
@@ -39,7 +40,7 @@ for epoch in range(epochs):
         
         # Call the loss function from the utils file
         loss_pde, loss_norm, loss_ortho, E = utils.loss_functions(
-            model, V_sensors, x_c, V_c, psi_prev=None
+            model, V_sensors, x_c, V_c,
         )
         
         loss = (w_pde * loss_pde) + (w_norm * loss_norm) + (w_ortho * loss_ortho)
@@ -58,7 +59,7 @@ for epoch in range(epochs):
         history_norm.append(epoch_norm / steps_per_epoch)
         history_ortho.append(epoch_ortho / steps_per_epoch)
         
-        print(f"epoch={epoch:4d} | Total: {avg_total:.3e} | PDE: {history_pde[-1]:.3e} | Norm: {history_norm[-1]:.3e}")
+        print(f"epoch={epoch:4d} | Total: {avg_total:.3e} | PDE: {history_pde[-1]:.3e} | Norm: {history_norm[-1]:.3e} | Ortho: {history_ortho[-1]:.3e}")
 
 
 # Save the trained model
