@@ -7,7 +7,7 @@ def main():
     
     n_sensors = 50
     latent_dim = 64
-    n_states = 3
+    n_states = 5
     
     sensor_x = torch.linspace(0.0, 1.0, n_sensors).to(device)
     model = utils.DeepONet(n_sensors=n_sensors, n_states=n_states, latent_dim=latent_dim).to(device)

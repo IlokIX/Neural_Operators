@@ -4,7 +4,7 @@ import utils
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 n_sensors = 50
 n_collocation = 1024
-n_states = 3  
+n_states = 5  
 sensor_x = torch.linspace(0.0, 1.0, n_sensors).to(device)
 
 model = utils.DeepONet(n_sensors=n_sensors, n_states=n_states, latent_dim=64).to(device)
@@ -16,8 +16,8 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 epochs = 100
 steps_per_epoch = 50
 w_pde = 1.0
-w_norm = 100.0
-w_ortho = 10000.0
+w_norm = 1000.0
+w_ortho = 100000.0
 #---------------------------------------------------------
 
 history_pde, history_norm, history_ortho, history_total = [], [], [], []
